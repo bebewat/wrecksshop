@@ -1,5 +1,4 @@
-- name: Build exe with PyInstaller
-  run: pyinstaller --onefile --windowed --name arkshopbot --add-data "shop_items.json;." --add-data "db.py;." --add-data ".env.example;." "Discord_Shop_System.py"
+name: Build exe with PyInstaller
 
 on:
   push:
