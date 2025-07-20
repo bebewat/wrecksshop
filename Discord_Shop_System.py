@@ -45,7 +45,7 @@ async def reward_active_players():
                         msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
                         mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
                 except Exception as e:
-        print(f"Failed to send /points response via RCON: {e}")
+                print(f"Failed to send /points response via RCON: {e}")
     elif content.startswith(MESSAGES["TradeCmd"]):
                     print(f"Failed to send RCON message: {e}")
 
