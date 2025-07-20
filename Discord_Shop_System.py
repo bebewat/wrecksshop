@@ -36,18 +36,18 @@ MESSAGES = {
 async def reward_active_players():
     for guild in bot.guilds:
         for member in guild.members:
-            if not member.bot:
-                eos_id = get_eos_for_discord(member.id)
-            if eos_id:
-                new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
-                try:
-                    with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                        msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
-                        mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
-                except Exception as e:
-                    print(f"Failed to send /points response via RCON: {e}")
-    elif content.startswith(MESSAGES["TradeCmd"]):
-                    print(f"Failed to send RCON message: {e}")
+            if member.bot:
+                continue
+            eos_id = get_eos_for_discord(member.id)
+            if not eos_id:
+                continue
+            new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
+            try:
+                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                    msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
+                    mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
+            except Exception as e:
+                print(f"Failed to send RCON message: {e}")
 
 @bot.event
 async def on_ready():
