@@ -63,14 +63,17 @@ CREATE TABLE IF NOT EXISTS pending_deliveries (
 conn.commit()
 
 # Helper functions
+
 def get_eos_for_discord(discord_id):
     # Replace with actual lookup to your linking system
     return f"eos_{discord_id}"
+
 
 def get_balance(player_id):
     c.execute("SELECT SUM(points) FROM transactions WHERE player_id = ?", (player_id,))
     result = c.fetchone()[0]
     return result or 0
+
 
 def log_transaction(player_id, points, status, source="shop"):
     c.execute("INSERT INTO transactions (player_id, points, status, source) VALUES (?,?,?,?)",
@@ -78,10 +81,12 @@ def log_transaction(player_id, points, status, source="shop"):
     conn.commit()
     return get_balance(player_id)
 
+
 def queue_delivery(player_id, item_name, command, map_name, price):
     c.execute("INSERT INTO pending_deliveries (player_id, item_name, command, map, price) VALUES (?,?,?,?,?)",
               (player_id, item_name, command, map_name, price))
     conn.commit()
+
 
 def deliver_queued_items():
     c.execute("SELECT id, player_id, command FROM pending_deliveries WHERE status='pending'")
@@ -97,6 +102,7 @@ def deliver_queued_items():
             continue
     conn.commit()
     return count
+
 
 def send_rcon(command):
     try:
@@ -154,7 +160,7 @@ async def reward_active_players():
                 continue
             new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
             try:
-                msg = MESSAGES["ReceivedPoints"].format(REWARD_INTERVAL_MINUTES, new_balance)
+                msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
                 with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
                     mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
             except Exception as e:
@@ -174,57 +180,44 @@ async def on_message(message):
     eos_id = get_eos_for_discord(message.author.id)
     if not eos_id:
         return
-
-    # /points in-game
     if content == MESSAGES["PointsCmd"]:
         points = get_balance(eos_id)
         try:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} " +
+                mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} " + 
                             MESSAGES["HavePoints"].format(points))
         except Exception as e:
             print(f"[RCON] /points error: {e}")
-
-    # /trade in-game
     elif content.startswith(MESSAGES["TradeCmd"]):
         parts = content.split()
-        if len(parts) != 3:
-            return
+        if len(parts) != 3: return
         _, target_name, amt_str = parts
         try:
             amount = int(amt_str)
         except:
             return
-        if amount <= 0:
-            return
-
-        from_user = message.author
-        to_user = discord.utils.get(message.guild.members, name=target_name)
+        if amount <= 0: return
+        from_user, to_user = message.author, discord.utils.get(message.guild.members, name=target_name)
         if not to_user:
             return
         if from_user.id == to_user.id:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES["CantGivePoints"])
+                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES['CantGivePoints'])
             return
-
-        from_id = get_eos_for_discord(from_user.id)
-        to_id = get_eos_for_discord(to_user.id)
-        if not from_id or not to_id:
-            return
-
-        balance = get_balance(from_id)
-        if balance < amount:
+        from_id, to_id = get_eos_for_discord(from_user.id), get_eos_for_discord(to_user.id)
+        if not from_id or not to_id: return
+        bal = get_balance(from_id)
+        if bal < amount:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES["NoPoints"])
+                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES['NoPoints'])
             return
-
         log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
         log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
         with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
-                        MESSAGES["SentPoints"].format(amount, to_user.display_name))
-            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
-                        MESSAGES["GotPoints"].format(amount, from_user.display_name))
+            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + 
+                        MESSAGES['SentPoints'].format(amount, to_user.display_name))
+            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " + 
+                        MESSAGES['GotPoints'].format(amount, from_user.display_name))
 
 # Shop UI views
 class ShopCategoryDropdown(Select):
@@ -237,34 +230,29 @@ class ShopCategoryDropdown(Select):
         self.items = items
 
     async def callback(self, interaction: discord.Interaction):
-        item = next(i for i in self.items if i['name'] == self.values[0])
+        item = next(i for i in self.items if i['name']==self.values[0])
         player_id = get_eos_for_discord(interaction.user.id)
         if not player_id:
             return await interaction.response.send_message("⚠️ You’re not linked.", ephemeral=True)
-
-        # Prompt for map
         await interaction.response.send_message("Select your map:", view=MapSelectView(interaction.user.id), ephemeral=True)
         interaction.client.temp_purchases[interaction.user.id] = item
 
 class MapSelect(Select):
     def __init__(self, user_id):
         self.user_id = user_id
-        maps = ["The Island", "Scorched Earth", "Aberration", "Extinction", "Genesis",
-                "Genesis Part 2", "Ragnarok", "Valguero", "Crystal Isles", "Fjordur"]
+        maps = ["The Island","Scorched Earth","Aberration","Extinction","Genesis","Genesis Part 2","Ragnarok","Valguero","Crystal Isles","Fjordur"]
         opts = [discord.SelectOption(label=m, value=m) for m in maps]
         super().__init__(placeholder="Select map", min_values=1, max_values=1, options=opts)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
+        if interaction.user.id!=self.user_id:
             return await interaction.response.send_message("❌ Not your session.", ephemeral=True)
-
-        item = interaction.client.temp_purchases.pop(self.user_id, None)
-        map_name = self.values[0]
+        purchase = interaction.client.temp_purchases.pop(self.user_id, None)
+        if not purchase: return await interaction.response.send_message("⚠️ Session expired.", ephemeral=True)
+        item, map_name = purchase, self.values[0]
         player_id = get_eos_for_discord(interaction.user.id)
-
-        if not item or get_balance(player_id) < item['price']:
-            return await interaction.response.send_message("❌ Insufficient points or session expired.", ephemeral=True)
-
+        if get_balance(player_id)<item['price']:
+            return await interaction.response.send_message("❌ Insufficient points.", ephemeral=True)
         cmd = item['command'].replace("{implantID}", player_id).replace("{map}", map_name)
         try:
             send_rcon(cmd)
@@ -290,48 +278,47 @@ class ShopView(View):
 
 @bot.event
 async def on_interaction(interaction: discord.Interaction):
-    if interaction.data.get('custom_id') == 'deliver_queue':
+    if interaction.data.get('custom_id')=='deliver_queue':
         if not interaction.user.guild_permissions.administrator:
             return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
-        count = deliver_queued_items()
+        count=deliver_queued_items()
         await interaction.response.send_message(f"✅ Delivered {count} queued items.", ephemeral=True)
 
 @bot.tree.command(name="postshop", description="Post the shop menu")
 async def postshop(interaction: discord.Interaction):
+    # Role-based permission check
+    admin_roles = os.getenv("ADMIN_ROLE_NAMES", "Shop Admin").split(",")
+    if not any(role.name in admin_roles for role in interaction.user.roles):
+        return await interaction.response.send_message("❌ You don't have permission to post the shop.", ephemeral=True)
+    # Proceed to post the shop menu
+
     await interaction.response.send_message("🛒 Shop Menu", view=ShopView())
 
 class RetryTip4ServButton(Button):
     retry_tracker = {}
-
     def __init__(self, player_id, points):
         super().__init__(label=f"Retry {points}@{player_id}", style=discord.ButtonStyle.secondary)
-        self.player_id = player_id
-        self.points = points
-
-    async def callback(self, interaction: discord.Interaction):
-        key = (interaction.user.id, self.player_id)
+        self.player_id=player_id; self.points=points
+    async def callback(self, interaction):
+        key=(interaction.user.id,self.player_id)
         import time
-        now = time.time()
-        window = 3 * 3600
-        attempts = self.retry_tracker.get(key, [])
-        attempts = [t for t in attempts if now - t < window]
-        if len(attempts) >= 2:
+        now=time.time(); window=3*3600
+        attempts=self.retry_tracker.get(key,[])
+        attempts=[t for t in attempts if now-t<window]
+        if len(attempts)>=2:
             return await interaction.response.send_message("❌ Retry limit reached.", ephemeral=True)
-        attempts.append(now)
-        self.retry_tracker[key] = attempts
-
-        log_transaction(self.player_id, self.points, "ManualRetry", source="tip4serv")
+        attempts.append(now); self.retry_tracker[key]=attempts
+        log_transaction(self.player_id,self.points,"ManualRetry",source="tip4serv")
         await interaction.response.send_message(f"✅ Retried {self.points}@{self.player_id}", ephemeral=True)
-        self.disabled = True
-        await interaction.message.edit(view=self.view)
+        self.disabled=True; await interaction.message.edit(view=self.view)
 
 @bot.command(name="resetretry")
 @commands.has_permissions(administrator=True)
 async def resetretry(ctx, member: discord.Member, player_id: str):
-    allowed = ["Admin", "Senior Mod"]
+    allowed=["Admin","Senior Mod"]
     if not any(r.name in allowed for r in ctx.author.roles):
         return await ctx.send("❌ No permission.")
-    key = (member.id, player_id)
+    key=(member.id,player_id)
     if key in RetryTip4ServButton.retry_tracker:
         del RetryTip4ServButton.retry_tracker[key]
         return await ctx.send(f"🔄 Reset retry for {member.display_name}@{player_id}")
@@ -340,5 +327,4 @@ async def resetretry(ctx, member: discord.Member, player_id: str):
 if not DISCORD_TOKEN:
     print("[ERROR] DISCORD_TOKEN environment variable is missing. Please set it in .env before running.")
     sys.exit(1)
-
 bot.run(DISCORD_TOKEN)
