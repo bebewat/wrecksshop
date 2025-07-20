@@ -69,7 +69,7 @@ async def on_message(message):
     if content == MESSAGES["PointsCmd"]:
         points = get_balance(eos_id)
         try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
             msg = MESSAGES["HavePoints"].format(points)
             mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} {msg}")
         except Exception as e:
@@ -110,7 +110,7 @@ async def on_message(message):
         log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
 
         try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
             mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
                         MESSAGES["SentPoints"].format(amount, to_user.display_name))
             mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
