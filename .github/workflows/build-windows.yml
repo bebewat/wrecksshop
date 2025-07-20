@@ -25,7 +25,7 @@ jobs:
       - name: Build exe with PyInstaller
         run: |
           pyinstaller --onefile --windowed \
-            --name arkshopbot \
+            --name 'arkshopbot \
             --add-data "shop_items.json;." \
             --add-data "db.py;." \
             --add-data ".env.example;.env" \
