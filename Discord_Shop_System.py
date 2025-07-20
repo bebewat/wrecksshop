@@ -122,7 +122,10 @@ async def on_message(message):
 class ShopCategoryDropdown(Select):
     def __init__(self, category_name, items):
         options = [
-            discord.SelectOption(label=i["name"], description=f\"{i['price']} shop points\")
+            discord.SelectOption(
+                label=i["name"],
+                description=f"{i['price']} shop points\"
+            )
             for i in items[:25]
         ]
         super().__init__(placeholder=f\"🛒 {category_name}\", min_values=1, max_values=1, options=options)
