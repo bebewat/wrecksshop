@@ -23,8 +23,8 @@ WrecksShop is a Discord-based bot for delivering items to players in-game. It is
 * This is very much still a work-in-progress that will be changing frequently. Any questions about the bot, GUI, or suggestions can be directed to my discord: https://discord.gg/smXr7pQ37V
 
 ## Authors/Contributors:
-Bebe Watson -- unfortunate mastermind
-ChatGPT -- file updates, recommendations for progression, integration of mass data input, other busy-work assistance
+* Bebe Watson -- unfortunate mastermind
+* ChatGPT -- file updates, recommendations for progression, integration of mass data input, other busy-work assistance
 
 ## Version History:
 * 1.01 -- Initial Release
