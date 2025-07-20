@@ -16,6 +16,7 @@ REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
 REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
 
 bot = commands.Bot(command_prefix="/")
+bot = discord.Bot(intents=discord.Intents.all())
 
 MESSAGES = {
     "Sender": "LegendShop",
