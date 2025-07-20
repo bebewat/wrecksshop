@@ -9,6 +9,7 @@ from discord.ui import View, Select, Button, Modal, TextInput
 from discord import app_commands
 from dotenv import load_dotenv
 from mcrcon import MCRcon
+import sys
 
 # Load environment variables
 load_dotenv()
@@ -318,4 +319,7 @@ async def resetretry(ctx, member: discord.Member, player_id: str):
         return await ctx.send(f"🔄 Reset retry for {member.display_name}@{player_id}")
     await ctx.send(f"ℹ️ No record for {member.display_name}@{player_id}")
 
+if not DISCORD_TOKEN:
+    print("[ERROR] DISCORD_TOKEN environment variable is missing. Please set it in .env before running.")
+    sys.exit(1)
 bot.run(DISCORD_TOKEN)
