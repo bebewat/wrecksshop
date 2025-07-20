@@ -1,3 +1,5 @@
+# WrecksShop Discord Ark Shop Bot
+
 WrecksShop is a Discord-based bot for delivering items to players in-game. It is compatible with Tip4Serv donation shops, as well.
 
 Description:
@@ -8,8 +10,14 @@ Description:
 * Customizable -- set custom broadcast/in-game messages for shop functions, customize which logs to send where, etc.
 * Skips the need for other tools -- no need to use companion plug-ins or bots! This tool is designed to be standalone to reduce the number of resources needed, but can still be integrated with certain plug-ins for Ark Ascended & Discord that allow seamless overall function.
 
-Installing:
-* Unzip the file into the location you'd like your bot files to go, then simply double-click on the .exe file to begin the configuration process. You'll be able to start & stop the bot from the GUI after your config is complete.
+## Setup
+
+1. Copy `.env.example` to `.env` and fill in values.
+2. Place `logo.png` & `icon.png` into `assets/`.
+3. Install Python 3.11+ (if not using prebuilt `.exe`).
+4. Run the launcher:
+   ```bash
+   python arkshopbot_launcher.py
 
 Help:
 * This is very much still a work-in-progress that will be changing frequently. Any questions about the bot, GUI, or suggestions can be directed to my discord: https://discord.gg/smXr7pQ37V
