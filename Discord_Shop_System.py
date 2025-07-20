@@ -4,6 +4,7 @@ from discord.ui import View, Select, Button, Modal, TextInput
 import json
 from db import get_eos_for_discord, get_balance, log_transaction, queue_delivery, deliver_queued_items
 import os
+from discord import app_commands
 from mcrcon import MCRcon
 
 SHOP_LOG_CHANNEL_ID = 123456789012345678  # Replace with your log channel ID
