@@ -50,13 +50,6 @@ async def reward_active_players():
                 print(f"Failed to send RCON message: {e}")
 
 @bot.event
-async def on_ready():
-    print(f"Bot connected as {bot.user}")
-    reward_active_players.start()
-
-# (Rest of your code continues below without change)
-
-@bot.event
 async def on_message(message):
     if message.author.bot:
         return
@@ -66,57 +59,110 @@ async def on_message(message):
     if not eos_id:
         return
 
+    # Handle in-game /points command
     if content == MESSAGES["PointsCmd"]:
         points = get_balance(eos_id)
         try:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            msg = MESSAGES["HavePoints"].format(points)
-            mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} {msg}")
+                msg = MESSAGES["HavePoints"].format(points)
+                mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} {msg}")
         except Exception as e:
-        print(f"Failed to send /points response via RCON: {e}")
+            print(f"Failed to send /points response via RCON: {e}")
 
-        elif content.startswith(MESSAGES["TradeCmd"]):
+    # Handle in-game /trade command
+    elif content.startswith(MESSAGES["TradeCmd"]):
         parts = content.split()
         if len(parts) != 3:
-        return
+            return
         _, target_name, amount_str = parts
         try:
-        amount = int(amount_str)
+            amount = int(amount_str)
         except ValueError:
-        return
-
-        if amount <= 0:
-        return
+            return
 
         from_user = message.author
         to_user = discord.utils.get(message.guild.members, name=target_name)
+        # Validate target
         if not to_user:
-        return
-
+            try:
+                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['NoPlayer']}")
+            except:
+                pass
+            return
         if from_user.id == to_user.id:
-        return
+            try:
+                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['CantGivePoints']}")
+            except:
+                pass
+            return
 
         from_id = get_eos_for_discord(from_user.id)
         to_id = get_eos_for_discord(to_user.id)
-
         if not from_id or not to_id:
-        return
+            return
 
         balance = get_balance(from_id)
         if balance < amount:
-        return
+            try:
+                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['NoPoints']}")
+            except:
+                pass
+            return
 
+        # Perform the trade
         log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
         log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
-
         try:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
-                        MESSAGES["SentPoints"].format(amount, to_user.display_name))
-            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
-                        MESSAGES["GotPoints"].format(amount, from_user.display_name))
+                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + 
+                            MESSAGES["SentPoints"].format(amount, to_user.display_name))
+                mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " + 
+                            MESSAGES["GotPoints"].format(amount, from_user.display_name))
         except Exception as e:
+            print(f"[RCON] Trade message error: {e}")
+
+
+@bot.tree.command(name="trade", description="Send shop points to another player")
+@app_commands.describe(to_user="The Discord user to send points to", amount="The number of shop points to send")
+async def trade(interaction: discord.Interaction, to_user: discord.User, amount: int):
+    if amount <= 0:
+        await interaction.response.send_message("❌ You must send a positive number of points.", ephemeral=True)
+        return
+
+    from_user = interaction.user
+    if from_user.id == to_user.id:
+        await interaction.response.send_message(MESSAGES["CantGivePoints"], ephemeral=True)
+        return
+
+    from_id = get_eos_for_discord(from_user.id)
+    to_id = get_eos_for_discord(to_user.id)
+
+    if not from_id or not to_id:
+        await interaction.response.send_message(MESSAGES["NoPlayer"], ephemeral=True)
+        return
+
+    balance = get_balance(from_id)
+    if balance < amount:
+        await interaction.response.send_message(MESSAGES["NoPoints"], ephemeral=True)
+        return
+
+    log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
+    log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
+
+    try:
+        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+        mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
+                    MESSAGES["SentPoints"].format(amount, to_user.display_name))
+        mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
+                    MESSAGES["GotPoints"].format(amount, from_user.display_name))
+    except Exception as e:
         print(f"[RCON] Trade message error: {e}")
+
+    await interaction.response.send_message(f"✅ Sent `{amount}` points to `{to_user.display_name}`!", ephemeral=True)
+
 
 class ShopCategoryDropdown(Select):
     def __init__(self, category_name, items):
