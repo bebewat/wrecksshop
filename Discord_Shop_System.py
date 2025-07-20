@@ -285,7 +285,6 @@ async def on_interaction(interaction: discord.Interaction):
         await interaction.response.send_message(f"✅ Delivered {count} queued items.", ephemeral=True)
 
 @bot.tree.command(name="postshop", description="Post the shop menu")
-@app_commands.has_permissions(administrator=True)
 async def postshop(interaction: discord.Interaction):
     await interaction.response.send_message("🛒 Shop Menu", view=ShopView())
 
