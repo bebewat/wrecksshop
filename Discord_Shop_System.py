@@ -36,7 +36,7 @@ MESSAGES = {
 async def reward_active_players():
     for guild in bot.guilds:
         for member in guild.members:
-        if not member.bot:
+            if not member.bot:
             eos_id = get_eos_for_discord(member.id)
             if eos_id:
                 new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
