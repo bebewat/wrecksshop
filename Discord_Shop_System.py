@@ -180,18 +180,18 @@ class ShopCategoryDropdown(Select):
 
         player_id = get_eos_for_discord(interaction.user.id)
         if not player_id:
-        await interaction.response.send_message("⚠️ You’re not linked. Speak in CrossChat to link.", ephemeral=True)
-        return
+            await interaction.response.send_message("⚠️ You’re not linked. Speak in CrossChat to link.", ephemeral=True)
+            return
 
         item_command = item["command"].replace("{implantID}", player_id).replace("{map}", interaction.data.get('map', 'Unknown'))
         if "{implantID}" in item["command"] and not player_id:
-        await interaction.response.send_message("⚠️ Unable to deliver: player ID (implantID) not found.", ephemeral=True)
-        return
+            await interaction.response.send_message("⚠️ Unable to deliver: player ID (implantID) not found.", ephemeral=True)
+            return
 
         selected_map = interaction.data.get('map')
         if not selected_map:
-        await interaction.response.send_message("⚠️ Please select your current map before proceeding.", ephemeral=True)
-        return
+            await interaction.response.send_message("⚠️ Please select your current map before proceeding.", ephemeral=True)
+            return
 
         item_command = item_command.replace("{map}", selected_map)
         interaction.client.temp_purchases[interaction.user.id] = {"item": item, "command": item_command, "map": selected_map}
@@ -216,31 +216,31 @@ class MapSelect(Select):
 
     async def callback(self, interaction: discord.Interaction):
         if interaction.user.id != self.user_id:
-        await interaction.response.send_message("❌ This map selector is not for you.", ephemeral=True)
-        return
+            await interaction.response.send_message("❌ This map selector is not for you.", ephemeral=True)
+            return
 
         purchase = interaction.client.temp_purchases.get(interaction.user.id)
         if not purchase:
-        await interaction.response.send_message("⚠️ Purchase session expired or missing.", ephemeral=True)
-        return
+            await interaction.response.send_message("⚠️ Purchase session expired or missing.", ephemeral=True)
+            return
 
         item = purchase["item"]
         player_id = get_eos_for_discord(interaction.user.id)
         map_name = self.values[0]
 
         if not player_id:
-        await interaction.response.send_message("⚠️ Unable to deliver: no EOS ID found.", ephemeral=True)
-        return
+            await interaction.response.send_message("⚠️ Unable to deliver: no EOS ID found.", ephemeral=True)
+            return
 
         balance = get_balance(player_id)
         if balance < item["price"]:
-        await interaction.response.send_message("❌ You don’t have enough shop points.", ephemeral=True)
-        return
+            await interaction.response.send_message("❌ You don’t have enough shop points.", ephemeral=True)
+            return
 
         item_command = item["command"].replace("{implantID}", player_id).replace("{map}", map_name)
         try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(item_command)
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                mcr.command(item_command)
         log_transaction(player_id, -item["price"], "Success", source=f"buy:{item['name']}:{map_name}")
         await interaction.response.send_message(f"✅ Delivered `{item['name']}` on `{map_name}`. Points deducted.", ephemeral=True)
         except Exception as e:
@@ -277,9 +277,9 @@ async def trade(interaction: discord.Interaction, to_user: discord.User, amount:
 
     try:
         with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-        mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
+            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
                     MESSAGES["SentPoints"].format(amount, to_user.display_name))
-        mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
+            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
                     MESSAGES["GotPoints"].format(amount, from_user.display_name))
     except Exception as e:
         print(f"[RCON] Trade message error: {e}")
