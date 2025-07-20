@@ -128,7 +128,7 @@ class ShopCategoryDropdown(Select):
             )
             for i in items[:25]
         ]
-        super().__init__(placeholder=f\"🛒 {category_name}\", min_values=1, max_values=1, options=options)
+        super().__init__(placeholder=f"🛒 {category_name}", min_values=1, max_values=1, options=options)
         self.category = category_name
         self.items = items
 
@@ -136,12 +136,12 @@ class ShopCategoryDropdown(Select):
         item = next(i for i in self.items if i["name"] == self.values[0])
         player_id = get_eos_for_discord(interaction.user.id)
         if not player_id:
-            await interaction.response.send_message(\"⚠️ You’re not linked. Speak in CrossChat to link.\", ephemeral=True)
+            await interaction.response.send_message("⚠️ You’re not linked. Speak in CrossChat to link.", ephemeral=True)
             return
 
         selected_map = interaction.data.get('map')
         if not selected_map:
-            await interaction.response.send_message(\"⚠️ Please select your current map before proceeding.\", ephemeral=True)
+            await interaction.response.send_message("⚠️ Please select your current map before proceeding.", ephemeral=True)
             return
 
         cmd = item["command"].replace("{implantID}", player_id).replace("{map}", selected_map)
@@ -149,7 +149,7 @@ class ShopCategoryDropdown(Select):
             "item": item, "command": cmd, "map": selected_map
         }
         await interaction.response.send_message(
-            \"🌍 Confirm map selection:\",
+            "🌍 Confirm map selection:",
             view=MapSelectDropdown(interaction.user.id),
             ephemeral=True
         )
