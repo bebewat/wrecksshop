@@ -1,23 +1,27 @@
+import os
+import json
+import sqlite3
+from threading import Thread
+from flask import Flask, request, jsonify
 import discord
 from discord.ext import commands, tasks
 from discord.ui import View, Select, Button, Modal, TextInput
-import json
-from db import get_eos_for_discord, get_balance, log_transaction, queue_delivery, deliver_queued_items
-import os
 from discord import app_commands
+from dotenv import load_dotenv
 from mcrcon import MCRcon
 
-SHOP_LOG_CHANNEL_ID = 123456789012345678  # Replace with your actual log channel ID
+# Load environment variables
+load_dotenv()
 
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", 0))
 RCON_HOST = os.getenv("RCON_HOST", "127.0.0.1")
 RCON_PORT = int(os.getenv("RCON_PORT", 25575))
 RCON_PASSWORD = os.getenv("RCON_PASSWORD", "changeme")
+REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
+REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
 
-REWARD_INTERVAL_MINUTES = 30  # Change to desired interval
-REWARD_POINTS = 10  # Change to desired amount
-
-bot = commands.Bot(command_prefix="/", intents=discord.Intents.all())
-
+# Messages templates with RichColor support
 MESSAGES = {
     "Sender": "LegendShop",
     "ReceivedPoints": "<RichColor Color=\"1, 1, 0, 1\">You have received {0} points! (total: {1})</>",
@@ -32,6 +36,118 @@ MESSAGES = {
     "TradeCmd": "/trade",
 }
 
+# Database setup
+conn = sqlite3.connect("shop.db", check_same_thread=False)
+c = conn.cursor()
+c.execute("""
+CREATE TABLE IF NOT EXISTS transactions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT,
+    points INTEGER,
+    status TEXT,
+    source TEXT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)""")
+c.execute("""
+CREATE TABLE IF NOT EXISTS pending_deliveries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    player_id TEXT,
+    item_name TEXT,
+    command TEXT,
+    map TEXT,
+    price INTEGER,
+    status TEXT DEFAULT 'pending',
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+)""")
+conn.commit()
+
+# Helper functions
+
+def get_eos_for_discord(discord_id):
+    # Replace with actual lookup to your linking system
+    return f"eos_{discord_id}"
+
+
+def get_balance(player_id):
+    c.execute("SELECT SUM(points) FROM transactions WHERE player_id = ?", (player_id,))
+    result = c.fetchone()[0]
+    return result or 0
+
+
+def log_transaction(player_id, points, status, source="shop"):
+    c.execute("INSERT INTO transactions (player_id, points, status, source) VALUES (?,?,?,?)",
+              (player_id, points, status, source))
+    conn.commit()
+    return get_balance(player_id)
+
+
+def queue_delivery(player_id, item_name, command, map_name, price):
+    c.execute("INSERT INTO pending_deliveries (player_id, item_name, command, map, price) VALUES (?,?,?,?,?)",
+              (player_id, item_name, command, map_name, price))
+    conn.commit()
+
+
+def deliver_queued_items():
+    c.execute("SELECT id, player_id, command FROM pending_deliveries WHERE status='pending'")
+    rows = c.fetchall()
+    count = 0
+    for id, pid, cmd in rows:
+        try:
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                mcr.command(cmd)
+            c.execute("UPDATE pending_deliveries SET status='delivered' WHERE id=?", (id,))
+            count += 1
+        except:
+            continue
+    conn.commit()
+    return count
+
+
+def send_rcon(command):
+    try:
+        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+            mcr.command(command)
+        return True
+    except Exception as e:
+        print(f"[RCON ERROR] {e}")
+        return False
+
+# Flask app for Tip4Serv webhook
+app = Flask(__name__)
+
+@app.route('/tip4serv-webhook', methods=['POST'])
+def handle_tip4serv():
+    data = request.json
+    player_id = (data.get("eos_id") or data.get("player_id") or data.get("pseudo") 
+                 or data.get("xuid") or data.get("steam_id"))
+    points = int(data.get("points", 0))
+    log_channel = bot.get_channel(SHOP_LOG_CHANNEL_ID)
+    if not player_id or points <= 0:
+        if log_channel:
+            log_channel.send(f"❌ Invalid webhook data: {data}")
+        return jsonify({"error": "Invalid data"}), 400
+    try:
+        log_transaction(player_id, points, "Success", source="tip4serv")
+        if log_channel:
+            log_channel.send(f"💸 Tip4Serv credited {points} points to {player_id}")
+        return jsonify({"message": "Points added."}), 200
+    except Exception as e:
+        if log_channel:
+            view = View()
+            view.add_item(RetryTip4ServButton(player_id, points))
+            log_channel.send(f"⚠️ Failed to credit {points} to {player_id}: {e}", view=view)
+        return jsonify({"error": "Server error"}), 500
+
+Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
+
+# Discord Bot initialization
+intents = discord.Intents.default()
+intents.message_content = True
+bot = commands.Bot(command_prefix='/', intents=intents)
+bot.temp_purchases = {}
+bot.admin_give_queue = {}
+
+# Reward loop
 @tasks.loop(minutes=REWARD_INTERVAL_MINUTES)
 async def reward_active_players():
     for guild in bot.guilds:
@@ -43,247 +159,163 @@ async def reward_active_players():
                 continue
             new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
             try:
+                msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
                 with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                    msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
                     mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
             except Exception as e:
-                print(f"Failed to send RCON message: {e}")
+                print(f"[RCON] reward error: {e}")
 
+@bot.event
+async def on_ready():
+    print(f"Bot ready: {bot.user}")
+    reward_active_players.start()
+
+# In-game chat handlers
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
-
     content = message.content.strip()
     eos_id = get_eos_for_discord(message.author.id)
     if not eos_id:
         return
-
-    # Handle in-game /points command
     if content == MESSAGES["PointsCmd"]:
         points = get_balance(eos_id)
         try:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                msg = MESSAGES["HavePoints"].format(points)
-                mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} {msg}")
+                mcr.command(f"chat {message.author.display_name} {MESSAGES['Sender']} " + 
+                            MESSAGES["HavePoints"].format(points))
         except Exception as e:
-            print(f"Failed to send /points response via RCON: {e}")
-
-    # Handle in-game /trade command
+            print(f"[RCON] /points error: {e}")
     elif content.startswith(MESSAGES["TradeCmd"]):
         parts = content.split()
-        if len(parts) != 3:
-            return
-        _, target_name, amount_str = parts
+        if len(parts) != 3: return
+        _, target_name, amt_str = parts
         try:
-            amount = int(amount_str)
-        except ValueError:
+            amount = int(amt_str)
+        except:
             return
-
-        from_user = message.author
-        to_user = discord.utils.get(message.guild.members, name=target_name)
-        # Validate target
+        if amount <= 0: return
+        from_user, to_user = message.author, discord.utils.get(message.guild.members, name=target_name)
         if not to_user:
-            try:
-                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['NoPlayer']}")
-            except:
-                pass
             return
         if from_user.id == to_user.id:
-            try:
-                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['CantGivePoints']}")
-            except:
-                pass
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES['CantGivePoints'])
             return
-
-        from_id = get_eos_for_discord(from_user.id)
-        to_id = get_eos_for_discord(to_user.id)
-        if not from_id or not to_id:
+        from_id, to_id = get_eos_for_discord(from_user.id), get_eos_for_discord(to_user.id)
+        if not from_id or not to_id: return
+        bal = get_balance(from_id)
+        if bal < amount:
+            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
+                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + MESSAGES['NoPoints'])
             return
-
-        balance = get_balance(from_id)
-        if balance < amount:
-            try:
-                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                    mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} {MESSAGES['NoPoints']}")
-            except:
-                pass
-            return
-
-        # Perform the trade
         log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
         log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
-        try:
-            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + 
-                            MESSAGES["SentPoints"].format(amount, to_user.display_name))
-                mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " + 
-                            MESSAGES["GotPoints"].format(amount, from_user.display_name))
-        except Exception as e:
-            print(f"[RCON] Trade message error: {e}")
-
-
-@bot.tree.command(name="trade", description="Send shop points to another player")
-@app_commands.describe(to_user="The Discord user to send points to", amount="The number of shop points to send")
-async def trade(interaction: discord.Interaction, to_user: discord.User, amount: int):
-    if amount <= 0:
-        await interaction.response.send_message("❌ You must send a positive number of points.", ephemeral=True)
-        return
-
-    from_user = interaction.user
-    if from_user.id == to_user.id:
-        await interaction.response.send_message(MESSAGES["CantGivePoints"], ephemeral=True)
-        return
-
-    from_id = get_eos_for_discord(from_user.id)
-    to_id = get_eos_for_discord(to_user.id)
-
-    if not from_id or not to_id:
-        await interaction.response.send_message(MESSAGES["NoPlayer"], ephemeral=True)
-        return
-
-    balance = get_balance(from_id)
-    if balance < amount:
-        await interaction.response.send_message(MESSAGES["NoPoints"], ephemeral=True)
-        return
-
-    log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
-    log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
-
-    try:
         with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
-                    MESSAGES["SentPoints"].format(amount, to_user.display_name))
-            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
-                    MESSAGES["GotPoints"].format(amount, from_user.display_name))
-    except Exception as e:
-        print(f"[RCON] Trade message error: {e}")
+            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " + 
+                        MESSAGES['SentPoints'].format(amount, to_user.display_name))
+            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " + 
+                        MESSAGES['GotPoints'].format(amount, from_user.display_name))
 
-    await interaction.response.send_message(f"✅ Sent `{amount}` points to `{to_user.display_name}`!", ephemeral=True)
-
-
+# Shop UI views
 class ShopCategoryDropdown(Select):
     def __init__(self, category_name, items):
         options = [
-        discord.SelectOption(label=item["name"], description=f"{item['price']} shop points")
-        for item in items[:25]  # Max 25 options per dropdown
+            discord.SelectOption(label=i['name'], description=f"{i['price']} shop points")
+            for i in items[:25]
         ]
         super().__init__(placeholder=f"🛒 {category_name}", min_values=1, max_values=1, options=options)
-        self.category = category_name
         self.items = items
 
     async def callback(self, interaction: discord.Interaction):
-        selected = self.values[0]
-        item = next(i for i in self.items if i["name"] == selected)
-
+        item = next(i for i in self.items if i['name']==self.values[0])
         player_id = get_eos_for_discord(interaction.user.id)
         if not player_id:
-            await interaction.response.send_message("⚠️ You’re not linked. Speak in CrossChat to link.", ephemeral=True)
-            return
-
-        item_command = item["command"].replace("{implantID}", player_id).replace("{map}", interaction.data.get('map', 'Unknown'))
-        if "{implantID}" in item["command"] and not player_id:
-            await interaction.response.send_message("⚠️ Unable to deliver: player ID (implantID) not found.", ephemeral=True)
-            return
-
-        selected_map = interaction.data.get('map')
-        if not selected_map:
-            await interaction.response.send_message("⚠️ Please select your current map before proceeding.", ephemeral=True)
-            return
-
-        item_command = item_command.replace("{map}", selected_map)
-        interaction.client.temp_purchases[interaction.user.id] = {"item": item, "command": item_command, "map": selected_map}
-        await interaction.response.send_message(
-        "🌍 Please select the map you are currently on to confirm your purchase:",
-        view=MapSelectDropdown(interaction.user.id),
-        ephemeral=True
-        )
-
-class MapSelectDropdown(View):
-    def __init__(self, user_id):
-        super().__init__(timeout=30)
-        self.user_id = user_id
-        self.add_item(MapSelect(user_id))
+            return await interaction.response.send_message("⚠️ You’re not linked.", ephemeral=True)
+        await interaction.response.send_message("Select your map:", view=MapSelectView(interaction.user.id), ephemeral=True)
+        interaction.client.temp_purchases[interaction.user.id] = item
 
 class MapSelect(Select):
     def __init__(self, user_id):
         self.user_id = user_id
-        maps = ["The Island", "Scorched Earth", "Aberration", "Extinction", "Genesis", "Genesis Part 2", "Ragnarok", "Valguero", "Crystal Isles", "Fjordur"]
-        options = [discord.SelectOption(label=m, value=m) for m in maps]
-        super().__init__(placeholder="Select your current map", min_values=1, max_values=1, options=options)
+        maps = ["The Island","Scorched Earth","Aberration","Extinction","Genesis","Genesis Part 2","Ragnarok","Valguero","Crystal Isles","Fjordur"]
+        opts = [discord.SelectOption(label=m, value=m) for m in maps]
+        super().__init__(placeholder="Select map", min_values=1, max_values=1, options=opts)
 
     async def callback(self, interaction: discord.Interaction):
-        if interaction.user.id != self.user_id:
-            await interaction.response.send_message("❌ This map selector is not for you.", ephemeral=True)
-            return
-
-        purchase = interaction.client.temp_purchases.get(interaction.user.id)
-        if not purchase:
-            await interaction.response.send_message("⚠️ Purchase session expired or missing.", ephemeral=True)
-            return
-
-        item = purchase["item"]
+        if interaction.user.id!=self.user_id:
+            return await interaction.response.send_message("❌ Not your session.", ephemeral=True)
+        purchase = interaction.client.temp_purchases.pop(self.user_id, None)
+        if not purchase: return await interaction.response.send_message("⚠️ Session expired.", ephemeral=True)
+        item, map_name = purchase, self.values[0]
         player_id = get_eos_for_discord(interaction.user.id)
-        map_name = self.values[0]
-
-        if not player_id:
-            await interaction.response.send_message("⚠️ Unable to deliver: no EOS ID found.", ephemeral=True)
-            return
-
-        balance = get_balance(player_id)
-        if balance < item["price"]:
-            await interaction.response.send_message("❌ You don’t have enough shop points.", ephemeral=True)
-            return
-
-        item_command = item["command"].replace("{implantID}", player_id).replace("{map}", map_name)
+        if get_balance(player_id)<item['price']:
+            return await interaction.response.send_message("❌ Insufficient points.", ephemeral=True)
+        cmd = item['command'].replace("{implantID}", player_id).replace("{map}", map_name)
         try:
-            with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                mcr.command(item_command)
-        log_transaction(player_id, -item["price"], "Success", source=f"buy:{item['name']}:{map_name}")
-        await interaction.response.send_message(f"✅ Delivered `{item['name']}` on `{map_name}`. Points deducted.", ephemeral=True)
-        except Exception as e:
-        queue_delivery(player_id, item["name"], item["command"], map_name, item["price"])
-        log_transaction(player_id, -item["price"], "Queued", source=f"buy:{item['name']}:{map_name}")
-        await interaction.response.send_message(f"📦 Player not detected. `{item['name']}` has been queued for delivery on `{map_name}`.", ephemeral=True)
+            send_rcon(cmd)
+            log_transaction(player_id, -item['price'], "Success", source=f"buy:{item['name']}:{map_name}")
+            await interaction.response.send_message(f"✅ Delivered {item['name']} on {map_name}.", ephemeral=True)
+        except Exception:
+            queue_delivery(player_id, item['name'], item['command'], map_name, item['price'])
+            log_transaction(player_id, -item['price'], "Queued", source=f"buy:{item['name']}:{map_name}")
+            await interaction.response.send_message(f"📦 Queued {item['name']} for {map_name}.", ephemeral=True)
 
-@bot.tree.command(name="trade", description="Send shop points to another player")
-@app_commands.describe(to_user="The Discord user to send points to", amount="The number of shop points to send")
-async def trade(interaction: discord.Interaction, to_user: discord.User, amount: int):
-    if amount <= 0:
-        await interaction.response.send_message("❌ You must send a positive number of points.", ephemeral=True)
-        return
+class MapSelectView(View):
+    def __init__(self, user_id):
+        super().__init__(timeout=30)
+        self.add_item(MapSelect(user_id))
 
-    from_user = interaction.user
-    if from_user.id == to_user.id:
-        await interaction.response.send_message(MESSAGES["CantGivePoints"], ephemeral=True)
-        return
+class ShopView(View):
+    def __init__(self):
+        super().__init__(timeout=None)
+        data = json.load(open('shop_items.json'))
+        for cat, items in data.items():
+            self.add_item(ShopCategoryDropdown(cat, items))
+        self.add_item(Button(label="Deliver Queued", style=discord.ButtonStyle.primary, custom_id="deliver_queue"))
 
-    from_id = get_eos_for_discord(from_user.id)
-    to_id = get_eos_for_discord(to_user.id)
+@bot.event
+async def on_interaction(interaction: discord.Interaction):
+    if interaction.data.get('custom_id')=='deliver_queue':
+        if not interaction.user.guild_permissions.administrator:
+            return await interaction.response.send_message("❌ Admins only.", ephemeral=True)
+        count=deliver_queued_items()
+        await interaction.response.send_message(f"✅ Delivered {count} queued items.", ephemeral=True)
 
-    if not from_id or not to_id:
-        await interaction.response.send_message(MESSAGES["NoPlayer"], ephemeral=True)
-        return
+@bot.tree.command(name="postshop", description="Post the shop menu")
+@app_commands.has_permissions(administrator=True)
+async def postshop(interaction: discord.Interaction):
+    await interaction.response.send_message("🛒 Shop Menu", view=ShopView())
 
-    balance = get_balance(from_id)
-    if balance < amount:
-        await interaction.response.send_message(MESSAGES["NoPoints"], ephemeral=True)
-        return
+class RetryTip4ServButton(Button):
+    retry_tracker = {}
+    def __init__(self, player_id, points):
+        super().__init__(label=f"Retry {points}@{player_id}", style=discord.ButtonStyle.secondary)
+        self.player_id=player_id; self.points=points
+    async def callback(self, interaction):
+        key=(interaction.user.id,self.player_id)
+        import time
+        now=time.time(); window=3*3600
+        attempts=self.retry_tracker.get(key,[])
+        attempts=[t for t in attempts if now-t<window]
+        if len(attempts)>=2:
+            return await interaction.response.send_message("❌ Retry limit reached.", ephemeral=True)
+        attempts.append(now); self.retry_tracker[key]=attempts
+        log_transaction(self.player_id,self.points,"ManualRetry",source="tip4serv")
+        await interaction.response.send_message(f"✅ Retried {self.points}@{self.player_id}", ephemeral=True)
+        self.disabled=True; await interaction.message.edit(view=self.view)
 
-    log_transaction(from_id, -amount, "TradeSent", source=f"to:{to_user.display_name}")
-    log_transaction(to_id, amount, "TradeReceived", source=f"from:{from_user.display_name}")
+@bot.command(name="resetretry")
+@commands.has_permissions(administrator=True)
+async def resetretry(ctx, member: discord.Member, player_id: str):
+    allowed=["Admin","Senior Mod"]
+    if not any(r.name in allowed for r in ctx.author.roles):
+        return await ctx.send("❌ No permission.")
+    key=(member.id,player_id)
+    if key in RetryTip4ServButton.retry_tracker:
+        del RetryTip4ServButton.retry_tracker[key]
+        return await ctx.send(f"🔄 Reset retry for {member.display_name}@{player_id}")
+    await ctx.send(f"ℹ️ No record for {member.display_name}@{player_id}")
 
-    try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
-                    MESSAGES["SentPoints"].format(amount, to_user.display_name))
-            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
-                    MESSAGES["GotPoints"].format(amount, from_user.display_name))
-    except Exception as e:
-        print(f"[RCON] Trade message error: {e}")
-
-    await interaction.response.send_message(f"✅ Sent `{amount}` points to `{to_user.display_name}`!", ephemeral=True)
-
-# (Rest of your file remains unchanged)
+bot.run(DISCORD_TOKEN)
