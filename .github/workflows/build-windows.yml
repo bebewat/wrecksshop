@@ -23,13 +23,8 @@ jobs:
           pip install pyinstaller mcrcon python-dotenv discord.py flask
 
       - name: Build exe with PyInstaller
-        run: |
-          pyinstaller --onefile --windowed \
-            --name 'arkshopbot \
-            --add-data "shop_items.json;." \
-            --add-data "db.py;." \
-            --add-data ".env.example;.env" \
-            "Discord_Shop_System.py"
+        run: pyinstaller --onefile --windowed --name arkshopbot --add-data "shop_items.json;." --add-data "db.py;." --add-data ".env.example;.env" "Discord Shop System.py"
+
 
       - name: Upload EXE artifact
         uses: actions/upload-artifact@v4
