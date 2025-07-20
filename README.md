@@ -19,6 +19,9 @@ WrecksShop is a Discord-based bot for delivering items to players in-game. It is
    ```bash
    python arkshopbot_launcher.py
 
+## Shop Items Configuration
+* Edit via GUI or directly in `shop_items.json`
+
 ## Help:
 * This is very much still a work-in-progress that will be changing frequently. Any questions about the bot, GUI, or suggestions can be directed to my discord: https://discord.gg/smXr7pQ37V
 
