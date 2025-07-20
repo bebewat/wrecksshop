@@ -124,7 +124,7 @@ class ShopCategoryDropdown(Select):
         options = [
             discord.SelectOption(
                 label=i["name"],
-                description=f"{i['price']} shop points\"
+                description=f"{i['price']} shop points"
             )
             for i in items[:25]
         ]
