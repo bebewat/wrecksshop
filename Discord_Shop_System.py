@@ -154,9 +154,9 @@ async def trade(interaction: discord.Interaction, to_user: discord.User, amount:
 
     try:
         with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-        mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
+            mcr.command(f"chat {from_user.display_name} {MESSAGES['Sender']} " +
                     MESSAGES["SentPoints"].format(amount, to_user.display_name))
-        mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
+            mcr.command(f"chat {to_user.display_name} {MESSAGES['Sender']} " +
                     MESSAGES["GotPoints"].format(amount, from_user.display_name))
     except Exception as e:
         print(f"[RCON] Trade message error: {e}")
