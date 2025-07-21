@@ -1,178 +1,143 @@
 import os
 import json
-import pymysql
-from threading import Thread
+import sys
+import hmac
+import hashlib
+import threading
 from flask import Flask, request, jsonify
 import discord
 from discord.ext import commands, tasks
-from discord.ui import View, Select, Button, Modal, TextInput
 from discord import app_commands
 from dotenv import load_dotenv
 from mcrcon import MCRcon
-import sys
-import json
+from aiolimiter import AsyncLimiter
+import pymysql
 
-# Load environment variables
+# Load environment
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", 0))
-RCON_SERVERS = json.loads(os.getenv("RCON_SERVERS", "[]"))
 REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
 REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
+TIP4SERV_SECRET = os.getenv("TIP4SERV_SECRET", "")
+TIP4SERV_TOKEN = os.getenv("TIP4SERV_TOKEN", "")
 
-# Messages templates with RichColor support
-MESSAGES = {
-    "Sender": "LegendShop",
-    "ReceivedPoints": "<RichColor Color=\"1, 1, 0, 1\">You have received {0} points! (total: {1})</>",
-    "HavePoints": "You have {0} points",
-    "NoPoints": "<RichColor Color=\"1, 0, 0, 1\">You don't have enough points</>",
-    "CantGivePoints": "<RichColor Color=\"1, 0, 0, 1\">You can't give points to yourself</>",
-    "SentPoints": "<RichColor Color=\"0, 1, 0, 1\">You have successfully sent {0} points to {1}</>",
-    "GotPoints": "You have received {0} points from {1}",
-    "NoPlayer": "<RichColor Color=\"1, 0, 0, 1\">Player doesn't exist</>",
-    "FoundMorePlayers": "<RichColor Color=\"1, 0, 0, 1\">Found more than one player with the given name</>",
-    "PointsCmd": "/points",
-    "TradeCmd": "/trade",
-}
+# Parse multiple MariaDB configs from env
+# Expected JSON: [{"name":"primary","host":"...","port":3306,"user":"...","password":"...","database":"..."}, ...]
+DB_CONFIGS = json.loads(os.getenv("SQL_DATABASES", "[]"))
+# Create connections
+db_conns = {}
+for cfg in DB_CONFIGS:
+    db_conns[cfg["name"]] = pymysql.connect(host=cfg["host"], port=int(cfg["port"]),
+                                             user=cfg["user"], password=cfg["password"],
+                                             database=cfg["database"], autocommit=True)
 
-# Database setup
-conn = sqlite3.connect("shop.db", check_same_thread=False)
-c = conn.cursor()
-c.execute("""
-CREATE TABLE IF NOT EXISTS transactions (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id TEXT,
-    points INTEGER,
-    status TEXT,
-    source TEXT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)""")
-c.execute("""
-CREATE TABLE IF NOT EXISTS pending_deliveries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    player_id TEXT,
-    item_name TEXT,
-    command TEXT,
-    map TEXT,
-    price INTEGER,
-    status TEXT DEFAULT 'pending',
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-)""")
-conn.commit()
+# Rate limiter for webhooks: e.g., 5 req per second
+webhook_limiter = AsyncLimiter(5, 1)
 
-# Helper functions
+# RCON settings
+RCON_SERVERS = json.loads(os.getenv("RCON_SERVERS", "[]"))
 
-def get_eos_for_discord(discord_id):
-    # Replace with actual lookup to your linking system
-    return f"eos_{discord_id}"
+# ===== Database Helpers =====
+def get_cursor(db_name="primary"):    
+    return db_conns[db_name].cursor()
 
+def get_balance(player_id, db_name="primary"):
+    cur = get_cursor(db_name)
+    cur.execute("SELECT COALESCE(SUM(points),0) FROM transactions WHERE player_id=%s", (player_id,))
+    bal = cur.fetchone()[0]
+    cur.close()
+    return bal
 
-def get_balance(player_id):
-    c.execute("SELECT SUM(points) FROM transactions WHERE player_id = ?", (player_id,))
-    result = c.fetchone()[0]
-    return result or 0
+def log_transaction(player_id, points, status, source="shop", db_name="primary"):
+    cur = get_cursor(db_name)
+    cur.execute(
+        "INSERT INTO transactions (player_id, points, status, source) VALUES (%s,%s,%s,%s)",
+        (player_id, points, status, source)
+    )
+    cur.close()
+    return get_balance(player_id, db_name)
 
+def queue_delivery(player_id, item_name, command, map_name, price, db_name="primary"):
+    cur = get_cursor(db_name)
+    cur.execute(
+        "INSERT INTO pending_deliveries (player_id, item_name, command, map, price) VALUES (%s,%s,%s,%s,%s)",
+        (player_id, item_name, command, map_name, price)
+    )
+    cur.close()
 
-def log_transaction(player_id, points, status, source="shop"):
-    c.execute("INSERT INTO transactions (player_id, points, status, source) VALUES (?,?,?,?)",
-              (player_id, points, status, source))
-    conn.commit()
-    return get_balance(player_id)
-
-
-def queue_delivery(player_id, item_name, command, map_name, price):
-    c.execute("INSERT INTO pending_deliveries (player_id, item_name, command, map, price) VALUES (?,?,?,?,?)",
-              (player_id, item_name, command, map_name, price))
-    conn.commit()
-
-
-def deliver_queued_items():
-    c.execute("SELECT id, player_id, command FROM pending_deliveries WHERE status='pending'")
-    rows = c.fetchall()
-    count = 0
-    for id, pid, cmd in rows:
+def deliver_queued_items(db_name="primary"):
+    cur = get_cursor(db_name)
+    cur.execute("SELECT id, player_id, command FROM pending_deliveries WHERE status='pending'")
+    rows = cur.fetchall(); count = 0
+    for id_, pid, cmd in rows:
         try:
             with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
                 mcr.command(cmd)
-            c.execute("UPDATE pending_deliveries SET status='delivered' WHERE id=?", (id,))
+            cur.execute("UPDATE pending_deliveries SET status='delivered' WHERE id=%s", (id_,))
             count += 1
         except:
             continue
-    conn.commit()
+    cur.close()
     return count
 
-
-def send_rcon(cmd: str, server_name: str = None, server_index: int = 0):
-    # Choose by name or by index
-    if server_name:
-        server = next((s for s in RCON_SERVERS if s["name"] == server_name), None)
-    else:
-        server = RCON_SERVERS[server_index] if server_index < len(RCON_SERVERS) else None
-
-    if not server:
-        raise RuntimeError(f"RCON server not found: {server_name or server_index}")
-
-    with MCRcon(server["host"], server["password"], port=server["port"]) as mcr:
-        mcr.command(cmd)
-
-
-# Flask app for Tip4Serv webhook
+# ===== Flask Webhook =====
 app = Flask(__name__)
 
 @app.route('/tip4serv-webhook', methods=['POST'])
-def handle_tip4serv():
-    data = request.json
-    player_id = (data.get("eos_id") or data.get("player_id") or data.get("pseudo") 
-                 or data.get("xuid") or data.get("steam_id"))
-    points = int(data.get("points", 0))
-    log_channel = bot.get_channel(SHOP_LOG_CHANNEL_ID)
-    if not player_id or points <= 0:
-        if log_channel:
-            log_channel.send(f"❌ Invalid webhook data: {data}")
-        return jsonify({"error": "Invalid data"}), 400
-    try:
-        log_transaction(player_id, points, "Success", source="tip4serv")
-        if log_channel:
-            log_channel.send(f"💸 Tip4Serv credited {points} points to {player_id}")
-        return jsonify({"message": "Points added."}), 200
-    except Exception as e:
-        if log_channel:
-            view = View()
-            view.add_item(RetryTip4ServButton(player_id, points))
-            log_channel.send(f"⚠️ Failed to credit {points} to {player_id}: {e}", view=view)
-        return jsonify({"error": "Server error"}), 500
+async def tip4serv_webhook():
+    async with webhook_limiter:
+        signature = request.headers.get('X-Tip4Serv-Signature','')
+        body = request.get_data()
+        if TIP4SERV_SECRET:
+            mac = hmac.new(TIP4SERV_SECRET.encode(), body, hashlib.sha256).hexdigest()
+            if not hmac.compare_digest(mac, signature):
+                return jsonify({'error':'Invalid signature'}), 403
+        data = request.json or {}
+        player_id = data.get('eos_id') or data.get('player_id')
+        points = int(data.get('points',0))
+        log_channel = bot.get_channel(SHOP_LOG_CHANNEL_ID)
+        if not player_id or points<=0:
+            if log_channel: await log_channel.send(f"❌ Invalid webhook payload: {data}")
+            return jsonify({'error':'Invalid data'}), 400
+        # Credit
+        new_bal = log_transaction(player_id, points, 'Success', source='tip4serv')
+        if log_channel: await log_channel.send(f"💸 Tip4Serv: +{points} points to {player_id} (now {new_bal})")
+        return jsonify({'status':'ok','balance':new_bal}), 200
 
-Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
+# Run Flask in background
+threading.Thread(target=lambda: app.run(host='0.0.0.0', port=8080), daemon=True).start()
 
-# Discord Bot initialization
+# ===== Discord Bot =====
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix='/', intents=intents)
 bot.temp_purchases = {}
-bot.admin_give_queue = {}
+
+# RCON env
+RCON_HOSTS = RCON_SERVERS  # GUI populates this in .env
+RCON_HOST = os.getenv('RCON_HOST','127.0.0.1')
+RCON_PORT = int(os.getenv('RCON_PORT',25575))
+RCON_PASSWORD = os.getenv('RCON_PASSWORD','changeme')
 
 # Reward loop
 @tasks.loop(minutes=REWARD_INTERVAL_MINUTES)
 async def reward_active_players():
     for guild in bot.guilds:
         for member in guild.members:
-            if member.bot:
-                continue
-            eos_id = get_eos_for_discord(member.id)
-            if not eos_id:
-                continue
-            new_balance = log_transaction(eos_id, REWARD_POINTS, "IntervalReward")
+            if member.bot: continue
+            eos_id = get_balance.__self__(member.id)  # placeholder: implement get_eos_for_discord
+            if not eos_id: continue
+            bal = log_transaction(eos_id, REWARD_POINTS, 'IntervalReward')
             try:
-                msg = MESSAGES["ReceivedPoints"].format(REWARD_POINTS, new_balance)
-                with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-                    mcr.command(f"chat {member.display_name} {MESSAGES['Sender']} {msg}")
+                await send_rcon(f"chat {member.display_name} LegendShop <RichColor Color=\\\"1,1,0,1\\\">+{REWARD_POINTS}! (total {bal})</>")
             except Exception as e:
-                print(f"[RCON] reward error: {e}")
+                print(f"[RCON] reward failed: {e}")
 
 @bot.event
 async def on_ready():
-    print(f"Bot ready: {bot.user}")
+    print(f"Logged in as {bot.user}")
     reward_active_players.start()
 
 # In-game chat handlers
