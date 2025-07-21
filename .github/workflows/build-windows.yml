@@ -20,14 +20,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install pyinstaller mcrcon python-dotenv discord.py flask
-
+          
       - name: Build GUI launcher EXE
         shell: bash
-        run: | 
+        run: |
           pyinstaller --onefile --windowed \
             --name arkshopbot_gui \
-            --icon logo_icon.ico \
+            --icon assets/icon.ico \
             arkshopbot_launcher.py
+
 
 
       - name: Upload GUI Launcher Artifact
