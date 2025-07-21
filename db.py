@@ -1,6 +1,7 @@
-import sqlite3
+import pymysql
+import json
 
-conn = sqlite3.connect("shop.db")
+conn = pymysql.connect("shop.db")
 c = conn.cursor()
 
 c.execute("""
