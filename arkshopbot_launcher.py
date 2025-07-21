@@ -2,7 +2,6 @@ import tkinter as tk
 from tkinter import filedialog, messagebox, simpledialog, ttk
 from tkinter.scrolledtext import ScrolledText
 import subprocess, os, json
-import pymysql  # For MariaDB connections
 
 # Paths
 env_path = '.env'
