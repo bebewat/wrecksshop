@@ -11,7 +11,6 @@ jobs:
 
     steps:
       - uses: actions/checkout@v3
-
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
@@ -22,12 +21,17 @@ jobs:
           python -m pip install --upgrade pip
           pip install pyinstaller mcrcon python-dotenv discord.py flask
 
-      - name: Build exe with PyInstaller
+      - name: Build GUI launcher EXE
         shell: bash
-        run: pyinstaller --onefile --windowed --name arkshopbot --icon logo_icon.ico --add-data "shop_items.json;." --add-data "db.py;." --add-data ".env.example;.env" "Discord_Shop_System.py"
+        run: | 
+          pyinstaller --onefile --windowed \
+            --name arkshopbot_gui \
+            --icon logo_icon.ico \
+            arkshopbot_launcher.py
 
-      - name: Upload EXE artifact
+
+      - name: Upload GUI Launcher Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arkshopbot-windows
-          path: dist/arkshopbot.exe
+          name: arkshopbot-gui-windows
+          path: dist\arkshopbot_gui.exe
