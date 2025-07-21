@@ -1,6 +1,6 @@
 import os
 import json
-import sqlite3
+import pymysql
 from threading import Thread
 from flask import Flask, request, jsonify
 import discord
