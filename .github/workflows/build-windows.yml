@@ -26,7 +26,7 @@ jobs:
         run: |
           pyinstaller --onefile --windowed \
             --name arkshopbot_gui \
-            --icon assets/icon.ico \
+            --icon logo_icon.ico \
             arkshopbot_launcher.py
 
 
