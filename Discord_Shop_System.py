@@ -10,15 +10,14 @@ from discord import app_commands
 from dotenv import load_dotenv
 from mcrcon import MCRcon
 import sys
+import json
 
 # Load environment variables
 load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 SHOP_LOG_CHANNEL_ID = int(os.getenv("SHOP_LOG_CHANNEL_ID", 0))
-RCON_HOST = os.getenv("RCON_HOST", "127.0.0.1")
-RCON_PORT = int(os.getenv("RCON_PORT", 25575))
-RCON_PASSWORD = os.getenv("RCON_PASSWORD", "changeme")
+RCON_SERVERS = json.loads(os.getenv("RCON_SERVERS", "[]"))
 REWARD_INTERVAL_MINUTES = int(os.getenv("REWARD_INTERVAL_MINUTES", 30))
 REWARD_POINTS = int(os.getenv("REWARD_POINTS", 10))
 
@@ -104,14 +103,19 @@ def deliver_queued_items():
     return count
 
 
-def send_rcon(command):
-    try:
-        with MCRcon(RCON_HOST, RCON_PASSWORD, port=RCON_PORT) as mcr:
-            mcr.command(command)
-        return True
-    except Exception as e:
-        print(f"[RCON ERROR] {e}")
-        return False
+def send_rcon(cmd: str, server_name: str = None, server_index: int = 0):
+    # Choose by name or by index
+    if server_name:
+        server = next((s for s in RCON_SERVERS if s["name"] == server_name), None)
+    else:
+        server = RCON_SERVERS[server_index] if server_index < len(RCON_SERVERS) else None
+
+    if not server:
+        raise RuntimeError(f"RCON server not found: {server_name or server_index}")
+
+    with MCRcon(server["host"], server["password"], port=server["port"]) as mcr:
+        mcr.command(cmd)
+
 
 # Flask app for Tip4Serv webhook
 app = Flask(__name__)
