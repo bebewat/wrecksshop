@@ -43,6 +43,12 @@ class WrecksShopLauncher:
             lbl.pack(pady=5)
         else:
             ttk.Label(root, text="WrecksShop", font=('Montserrat', 18, 'bold'), background='#f0f0f0').pack(pady=5)
+        # Initialize data containers before building tabs
+        self.servers = []
+        self.databases = []
+        self.categories = []
+        # Load existing config (populates self.categories)
+        self._load_env()
         # Notebook styling
         style = ttk.Style()
         style.theme_use('clam')
@@ -51,18 +57,14 @@ class WrecksShopLauncher:
         # Tabs container
         self.nb = ttk.Notebook(root)
         self.nb.pack(expand=True, fill='both', padx=10, pady=10)
-        # Build tabs
+        # Build tabs (categories now loaded)
         self._build_config_tab()
         self._build_servers_tab()
         self._build_databases_tab()
         self._build_shop_tab()
         self._build_library_tab()
         self._build_logs_tab()
-        # Load saved data
-        self.servers = []
-        self.databases = []
-        self.categories = []
-        self._load_env()
+        # Load remaining data
         self._load_servers()
         self._load_databases()
         self._load_shop_items()
