@@ -14,9 +14,15 @@ SHOP_ITEMS_PATH = 'shop_items.json'
 ASSETS_DIR = 'assets'
 LOGO_PATH = os.path.join(ASSETS_DIR, 'logo.png')
 ICON_PATH = os.path.join(ASSETS_DIR, 'icon.png')
-# CSV data library path
-CSV_REL_PATH = Path('data') / 'data/CleanArkData.csv'
-ARK_DATA = load_ark_lib(CSV_REL_PATH)
+# CSV data library path (robust lookup)
+base_dir = Path(__file__).parent
+csv_path = base_dir / 'data' / 'CleanArkData.csv'
+if not csv_path.is_file():
+    csv_path = base_dir / 'CleanArkData.csv'
+if not csv_path.is_file():
+    messagebox.showerror('Error', f'CleanArkData.csv not found at {csv_path}')
+    sys.exit(1)
+ARK_DATA = load_ark_lib(csv_path)
 
 # Config keys for .env
 CONFIG_KEYS = [
