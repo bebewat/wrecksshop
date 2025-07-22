@@ -33,7 +33,7 @@ jobs:
         run: |
           pyinstaller --noconfirm --clean \
             --name WrecksShop \
-            --add-data "CleanArkData.csv;data" \
+            --add-data "data/CleanArkData.csv;data" \
             --icon logo_icon.ico \
             arkshopbot_launcher.py
 
