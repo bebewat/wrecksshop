@@ -131,7 +131,7 @@ async def reward_active_players():
             if not eos_id: continue
             bal = log_transaction(eos_id, REWARD_POINTS, 'IntervalReward')
             try:
-                await send_rcon(f"chat {member.display_name} LegendShop <RichColor Color=\\\"1,1,0,1\\\">+{REWARD_POINTS}! (total {bal})</>")
+                await send_rcon(f"chat {member.display_name} WrecksShop <RichColor Color=\\\"1,1,0,1\\\">+{REWARD_POINTS}! (total {bal})</>")
             except Exception as e:
                 print(f"[RCON] reward failed: {e}")
 

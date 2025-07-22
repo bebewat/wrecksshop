@@ -1,241 +1,319 @@
-import tkinter as tk
-from tkinter import ttk, messagebox
-from tkinter.scrolledtext import ScrolledText
+import os
 import json
-import sys
-from pathlib import Path
+import subprocess
+import tkinter as tk
+from tkinter import filedialog, messagebox, simpledialog, ttk
+from tkinter.scrolledtext import ScrolledText
+import arklib_loader
+import command_builders
 
-from arklib_loader import load_ark_lib, ArkItem
-from command_builders import build_single
-from batch_builder import build_batch
-from paths import resource_path
+# Paths
+ENV_PATH = '.env'
+SHOP_ITEMS_PATH = 'shop_items.json'
+ASSETS_DIR = 'assets'
+LOGO_PATH = os.path.join(ASSETS_DIR, 'logo.png')
+ICON_PATH = os.path.join(ASSETS_DIR, 'icon.png')
 
-APP_TITLE = "WrecksShop"
-CSV_REL_PATH = "data/CleanArkData.csv"  # adjust if different
+# Config keys for .env
+CONFIG_KEYS = [
+    ('DISCORD_TOKEN', 'Discord Bot Token'),
+    ('SHOP_LOG_CHANNEL_ID', 'Discord Log Channel ID'),
+    ('TIP4SERV_SECRET', 'Tip4Serv Secret (optional)'),
+    ('TIP4SERV_TOKEN', 'Tip4Serv Token (optional)'),
+    ('REWARD_INTERVAL_MINUTES', 'Reward Interval (Minutes)'),
+    ('REWARD_POINTS', 'Reward Amount (Points)')
+]
 
-# ---------------------- Load Data ---------------------- #
-ARKLIB_PATH = resource_path(CSV_REL_PATH)
-ARK_DATA = load_ark_lib(ARKLIB_PATH)  # dict[section] -> list[ArkItem]
-
-# Helper lookups
-def get_sections():
-    return sorted(ARK_DATA.keys())
-
-def get_items_for_section(section: str):
-    return ARK_DATA.get(section, [])
-
-def find_item(section: str, name: str) -> ArkItem | None:
-    for it in ARK_DATA.get(section, []):
-        if it.name == name:
-            return it
-    return None
-
-# ---------------------- GUI ---------------------- #
-class WrecksShopGUI(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title(APP_TITLE)
-        self.geometry("1000x720")
-
-        self._build_widgets()
-
-    def _build_widgets(self):
-        nb = ttk.Notebook(self)
-        nb.pack(fill="both", expand=True)
-
-        # Tabs
-        self.single_tab = ttk.Frame(nb)
-        self.batch_tab = ttk.Frame(nb)
-        nb.add(self.single_tab, text="Single Command")
-        nb.add(self.batch_tab, text="Batch Builder")
-
-        self._build_single_tab(self.single_tab)
-        self._build_batch_tab(self.batch_tab)
-
-    # ---------- Single Tab ---------- #
-    def _build_single_tab(self, parent: ttk.Frame):
-        # Section + Item selection
-        top = ttk.Frame(parent)
-        top.pack(fill="x", padx=10, pady=10)
-
-        ttk.Label(top, text="Section:").grid(row=0, column=0, sticky="w")
-        self.section_var = tk.StringVar()
-        self.section_combo = ttk.Combobox(top, textvariable=self.section_var, state="readonly", values=get_sections())
-        self.section_combo.grid(row=0, column=1, sticky="we", padx=5)
-        self.section_combo.bind("<<ComboboxSelected>>", self.on_section_change)
-
-        ttk.Label(top, text="Item:").grid(row=1, column=0, sticky="w")
-        self.item_var = tk.StringVar()
-        self.item_combo = ttk.Combobox(top, textvariable=self.item_var, state="readonly")
-        self.item_combo.grid(row=1, column=1, sticky="we", padx=5)
-        self.item_combo.bind("<<ComboboxSelected>>", self.on_item_select)
-
-        top.columnconfigure(1, weight=1)
-
-        # Frames for params
-        self.item_frame = ttk.LabelFrame(parent, text="Item Params")
-        self.creature_frame = ttk.LabelFrame(parent, text="Creature Params")
-
-        # Item params
-        ip = self.item_frame
-        ttk.Label(ip, text="Player ID:").grid(row=0, column=0, sticky="e")
-        self.player_id_var = tk.StringVar(value="0")
-        ttk.Entry(ip, textvariable=self.player_id_var, width=12).grid(row=0, column=1, sticky="w")
-
-        ttk.Label(ip, text="Qty:").grid(row=1, column=0, sticky="e")
-        self.qty_var = tk.StringVar(value="1")
-        ttk.Entry(ip, textvariable=self.qty_var, width=8).grid(row=1, column=1, sticky="w")
-
-        ttk.Label(ip, text="Quality:").grid(row=2, column=0, sticky="e")
-        self.quality_var = tk.StringVar(value="1")
-        ttk.Entry(ip, textvariable=self.quality_var, width=8).grid(row=2, column=1, sticky="w")
-
-        self.is_bp_var = tk.BooleanVar(value=False)
-        ttk.Checkbutton(ip, text="Is Blueprint?", variable=self.is_bp_var).grid(row=3, column=0, columnspan=2, sticky="w")
-
-        for i in range(2):
-            ip.columnconfigure(i, weight=0)
-
-        # Creature params
-        cp = self.creature_frame
-        ttk.Label(cp, text="EOS ID:").grid(row=0, column=0, sticky="e")
-        self.eos_id_var = tk.StringVar()
-        ttk.Entry(cp, textvariable=self.eos_id_var, width=30).grid(row=0, column=1, sticky="w")
-
-        ttk.Label(cp, text="Level:").grid(row=1, column=0, sticky="e")
-        self.level_var = tk.StringVar(value="150")
-        ttk.Entry(cp, textvariable=self.level_var, width=8).grid(row=1, column=1, sticky="w")
-
-        self.breedable_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(cp, text="Breedable", variable=self.breedable_var).grid(row=2, column=0, columnspan=2, sticky="w")
-
-        for i in range(2):
-            cp.columnconfigure(i, weight=0)
-
-        # place frames (hidden first)
-        self.item_frame.pack(fill="x", padx=10, pady=5)
-        self.creature_frame.pack(fill="x", padx=10, pady=5)
-        self.hide_item_fields()
-        self.hide_creature_fields()
-
-        # Build button + output
-        btn = ttk.Button(parent, text="Build Command", command=self.build_single_command)
-        btn.pack(padx=10, pady=5, anchor="w")
-
-        self.output_box = ScrolledText(parent, height=10, wrap="none")
-        self.output_box.pack(fill="both", expand=True, padx=10, pady=10)
-
-    # ---------- Batch Tab ---------- #
-    def _build_batch_tab(self, parent: ttk.Frame):
-        # Simple version: user pastes JSON, we build. (You can extend with a table later.)
-        info = ("Paste batch JSON below or build a UI table later.\n"
-                "Structure: [ {\n  'category': 'Starter Kits',\n  'items': [ {'section': 'Weapons', 'name': 'Longneck Rifle'}, ...],\n  'params': {...},\n  'per_item_params': [{...}, {...}]\n} ]")
-        ttk.Label(parent, text=info, justify="left").pack(anchor="w", padx=10, pady=5)
-
-        self.batch_text = ScrolledText(parent, height=18, wrap="none")
-        self.batch_text.pack(fill="both", expand=True, padx=10, pady=5)
-
-        ttk.Button(parent, text="Build Batch", command=self.build_batch_commands).pack(padx=10, pady=5, anchor="w")
-
-        self.batch_output = ScrolledText(parent, height=10, wrap="none")
-        self.batch_output.pack(fill="both", expand=True, padx=10, pady=10)
-
-    # ---------- Callbacks ---------- #
-    def on_section_change(self, event=None):
-        section = self.section_var.get()
-        items = get_items_for_section(section)
-        self.item_combo["values"] = [i.name for i in items]
-        self.item_combo.set("")
-        self.hide_item_fields()
-        self.hide_creature_fields()
-
-    def on_item_select(self, event=None):
-        section = self.section_var.get()
-        name = self.item_var.get()
-        item = find_item(section, name)
-        if not item:
-            return
-        if item.section.lower() == "creatures":
-            self.show_creature_fields()
-            self.hide_item_fields()
+class WrecksShopLauncher:
+    def __init__(self, root):
+        self.root = root
+        root.title("WrecksShop Launcher")
+        root.configure(bg='#f0f0f0')
+        # Icon
+        try:
+            icon = tk.PhotoImage(file=ICON_PATH)
+            root.iconphoto(False, icon)
+        except Exception:
+            pass
+        # Header
+        if os.path.exists(LOGO_PATH):
+            img = tk.PhotoImage(file=LOGO_PATH)
+            lbl = ttk.Label(root, image=img, background='#f0f0f0')
+            lbl.image = img
+            lbl.pack(pady=5)
         else:
-            self.show_item_fields()
-            self.hide_creature_fields()
+            ttk.Label(root, text="WrecksShop", font=('Montserrat', 18, 'bold'), background='#f0f0f0').pack(pady=5)
+        # Notebook styling
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TNotebook.Tab', font=('Montserrat', 10), padding=(10, 8), background='#e6e6fa', borderwidth=1)
+        style.map('TNotebook.Tab', background=[('selected', '#d8bfd8')])
+        # Tabs container
+        self.nb = ttk.Notebook(root)
+        self.nb.pack(expand=True, fill='both', padx=10, pady=10)
+        # Build tabs
+        self._build_config_tab()
+        self._build_servers_tab()
+        self._build_databases_tab()
+        self._build_shop_tab()
+        self._build_library_tab()
+        self._build_logs_tab()
+        # Load saved data
+        self.servers = []
+        self.databases = []
+        self.categories = []
+        self._load_env()
+        self._load_servers()
+        self._load_databases()
+        self._load_shop_items()
+        self._load_library()
+        # Process handle
+        self.process = None
 
-    # ---------- Builders ---------- #
-    def build_single_command(self):
-        section = self.section_var.get()
-        name = self.item_var.get()
-        item = find_item(section, name)
-        if not item:
-            messagebox.showerror("Error", "Item not found")
+    def _build_config_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='Configuration')
+        self.config_entries = {}
+        for i, (key, label) in enumerate(CONFIG_KEYS):
+            ttk.Label(frame, text=label).grid(row=i, column=0, sticky='w', pady=4)
+            entry = ttk.Entry(frame, width=40)
+            entry.grid(row=i, column=1, pady=4)
+            self.config_entries[key] = entry
+        ttk.Button(frame, text='Save Settings', command=self._save_env).grid(row=len(CONFIG_KEYS), column=0, columnspan=2, pady=10)
+
+    def _build_servers_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='RCON Servers')
+        cols = ('Name', 'Host', 'Port', 'Password')
+        self.srv_tv = ttk.Treeview(frame, columns=cols, show='headings')
+        for c in cols:
+            self.srv_tv.heading(c, text=c)
+        self.srv_tv.pack(expand=True, fill='both', pady=5)
+        btnf = ttk.Frame(frame)
+        btnf.pack()
+        ttk.Button(btnf, text='Add Server', command=self._add_server).pack(side='left', padx=5)
+        ttk.Button(btnf, text='Remove Server', command=self._remove_server).pack(side='left', padx=5)
+
+    def _build_databases_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='SQL Databases')
+        cols = ('Name', 'Host', 'Port', 'User', 'DB')
+        self.db_tv = ttk.Treeview(frame, columns=cols, show='headings')
+        for c in cols:
+            self.db_tv.heading(c, text=c)
+        self.db_tv.pack(expand=True, fill='both', pady=5)
+        btnf = ttk.Frame(frame)
+        btnf.pack()
+        ttk.Button(btnf, text='Add DB', command=self._add_database).pack(side='left', padx=5)
+        ttk.Button(btnf, text='Remove DB', command=self._remove_database).pack(side='left', padx=5)
+
+    def _build_shop_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='Shop Items')
+        ttk.Label(frame, text='Category').pack(anchor='w', pady=4)
+        self.cat_combo = ttk.Combobox(frame, values=self.categories, state='readonly')
+        self.cat_combo.pack(fill='x', padx=5, pady=4)
+        ttk.Button(frame, text='Add Category', command=self._add_category).pack(pady=4)
+        cols = ('Name', 'Command', 'Price', 'Limit', 'Roles')
+        self.item_tv = ttk.Treeview(frame, columns=cols, show='headings')
+        for c in cols:
+            self.item_tv.heading(c, text=c)
+        self.item_tv.pack(expand=True, fill='both', pady=5)
+        form = ttk.Frame(frame)
+        form.pack(fill='x', pady=5)
+        for idx, lbl in enumerate(['Name', 'Command', 'Price']):
+            ttk.Label(form, text=lbl).grid(row=0, column=idx, padx=4)
+            entry = ttk.Entry(form, width=30)
+            entry.grid(row=1, column=idx, padx=4)
+            setattr(self, f'{lbl.lower()}_entry', entry)
+        self.limit_var = tk.BooleanVar()
+        ttk.Checkbutton(form, text='Limit', variable=self.limit_var).grid(row=1, column=3, padx=4)
+        ttk.Label(form, text='Roles (IDs)').grid(row=0, column=4, padx=4)
+        self.roles_entry = ttk.Entry(form, width=30)
+        self.roles_entry.grid(row=1, column=4, padx=4)
+        self.all_var = tk.BooleanVar()
+        ttk.Checkbutton(form, text='All', variable=self.all_var, command=self._on_all_roles).grid(row=1, column=5, padx=4)
+        ttk.Button(frame, text='Add Item', command=self._on_add_item).pack(pady=5)
+
+    def _build_library_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='Data Library')
+        cols = ('Name', 'Blueprint Path', 'Mod/DLC')
+        self.lib_tv = ttk.Treeview(frame, columns=cols, show='headings')
+        for c in cols:
+            self.lib_tv.heading(c, text=c)
+        self.lib_tv.pack(expand=True, fill='both', pady=5)
+        ttk.Button(frame, text='Import Selection', command=self._on_lib_import).pack(pady=4)
+
+    def _build_logs_tab(self):
+        frame = ttk.Frame(self.nb)
+        self.nb.add(frame, text='Logs')
+        self.log_box = ScrolledText(frame, state='disabled', font=('Consolas', 10))
+        self.log_box.pack(expand=True, fill='both', pady=5)
+        ttk.Button(frame, text='Save Log', command=self._save_log).pack(pady=5)
+
+    def _load_env(self):
+        if os.path.exists(ENV_PATH):
+            data = dict(line.strip().split('=', 1) for line in open(ENV_PATH) if '=' in line)
+            for k, e in self.config_entries.items():
+                e.insert(0, data.get(k, ''))
+            self.servers = json.loads(data.get('RCON_SERVERS', '[]'))
+            self.databases = json.loads(data.get('SQL_DATABASES', '[]'))
+            # Load categories from existing shop items
+            if os.path.exists(SHOP_ITEMS_PATH):
+                shop = json.load(open(SHOP_ITEMS_PATH))
+                self.categories = list(shop.keys())
+
+    def _save_env(self):
+        out = {k: v.get() for k, v in self.config_entries.items()}
+        out['RCON_SERVERS'] = self.servers
+        out['SQL_DATABASES'] = self.databases
+        with open(ENV_PATH, 'w') as f:
+            for k, v in out.items():
+                val = json.dumps(v) if isinstance(v, list) else v
+                f.write(f"{k}={val}\n")
+        messagebox.showinfo('Saved', 'Configuration saved successfully.')
+        self._log('Configuration saved.')
+
+    def _load_servers(self):
+        for s in self.servers:
+            self.srv_tv.insert('', 'end', values=(s['name'], s['host'], s['port'], '*'*len(s['password'])))
+
+    def _add_server(self):
+        name = simpledialog.askstring('Server Name', 'Enter unique server name:')
+        if not name: return
+        host = simpledialog.askstring('Host', 'Enter RCON host/IP:')
+        port = simpledialog.askinteger('Port', 'Enter RCON port:')
+        pwd = simpledialog.askstring('Password', 'Enter RCON password:', show='*')
+        srv = {'name': name, 'host': host, 'port': port, 'password': pwd}
+        self.servers.append(srv)
+        self.srv_tv.insert('', 'end', values=(name, host, port, '*'*len(pwd)))
+        self._log(f"Added server: {name}")
+
+    def _remove_server(self):
+        sel = self.srv_tv.selection()
+        if sel:
+            idx = self.srv_tv.index(sel)
+            name = self.servers.pop(idx)['name']
+            self.srv_tv.delete(sel)
+            self._log(f"Removed server: {name}")
+
+    def _load_databases(self):
+        for db in self.databases:
+            self.db_tv.insert('', 'end', values=(db['name'], db['host'], db['port'], db['user'], db['database']))
+
+    def _add_database(self):
+        name = simpledialog.askstring('DB Name', 'Enter unique DB name:')
+        if not name: return
+        host = simpledialog.askstring('Host', 'Enter DB host/IP:')
+        port = simpledialog.askinteger('Port', 'Enter DB port:')
+        user = simpledialog.askstring('User', 'Enter DB user:')
+        pwd = simpledialog.askstring('Password', 'Enter DB password:', show='*')
+        dbname = simpledialog.askstring('Database', 'Enter database name:')
+        db = {'name': name, 'host': host, 'port': port, 'user': user, 'password': pwd, 'database': dbname}
+        self.databases.append(db)
+        self.db_tv.insert('', 'end', values=(name, host, port, user, dbname))
+        self._log(f"Added DB: {name}")
+
+    def _remove_database(self):
+        sel = self.db_tv.selection()
+        if sel:
+            idx = self.db_tv.index(sel)
+            name = self.databases.pop(idx)['name']
+            self.db_tv.delete(sel)
+            self._log(f"Removed DB: {name}")
+
+    def _load_shop_items(self):
+        if os.path.exists(SHOP_ITEMS_PATH):
+            data = json.load(open(SHOP_ITEMS_PATH))
+            for cat, items in data.items():
+                for itm in items:
+                    roles = 'all' if itm.get('roles') == 'all' else ','.join(itm.get('roles', []))
+                    self.item_tv.insert('', 'end', values=(itm['name'], itm['command'], itm['price'], itm['limit'], roles))
+            self.categories = list(data.keys())
+            self.cat_combo['values'] = self.categories
+
+    def _add_category(self):
+        name = simpledialog.askstring('Category', 'Enter category name:')
+        if name and name not in self.categories:
+            self.categories.append(name)
+            self.cat_combo['values'] = self.categories
+            self._log(f"Added category: {name}")
+
+    def _on_all_roles(self):
+        if self.all_var.get():
+            self.roles_entry.delete(0, tk.END)
+            self.roles_entry.insert(0, 'all')
+
+    def _on_add_item(self):
+        cat = self.cat_combo.get().strip()
+        if not cat:
+            messagebox.showerror('Error', 'Select a category')
             return
+        name = self.name_entry.get().strip()
+        cmd = self.command_entry.get().strip()
+        price = self.price_entry.get().strip()
+        limit = self.limit_var.get()
+        roles = self.roles_entry.get().strip()
         try:
-            if item.section.lower() == "creatures":
-                params = {
-                    "eos_id": self.eos_id_var.get().strip(),
-                    "level": int(self.level_var.get()),
-                    "breedable": bool(self.breedable_var.get()),
-                }
-            else:
-                params = {
-                    "player_id": int(self.player_id_var.get()),
-                    "qty": int(self.qty_var.get()),
-                    "quality": int(self.quality_var.get()),
-                    "is_bp": bool(self.is_bp_var.get()),
-                }
-            cmds = build_single(item, **params)
-            self.output_box.delete("1.0", "end")
-            self.output_box.insert("end", "\n".join(cmds))
-        except Exception as e:
-            messagebox.showerror("Build Error", str(e))
-
-    def build_batch_commands(self):
-        text = self.batch_text.get("1.0", "end").strip()
-        if not text:
-            messagebox.showwarning("Empty", "Provide batch JSON")
+            price_val = int(price)
+        except ValueError:
+            messagebox.showerror('Error', 'Price must be an integer')
             return
-        try:
-            raw_entries = json.loads(text)
-            # Convert item dicts to ArkItem objects
-            entries = []
-            for entry in raw_entries:
-                cat = entry.get("category", "")
-                items_conf = entry.get("items", [])
-                items: list[ArkItem] = []
-                for ic in items_conf:
-                    sec = ic["section"]
-                    nm = ic["name"]
-                    it = find_item(sec, nm)
-                    if it:
-                        items.append(it)
-                e2 = {
-                    "category": cat,
-                    "items": items,
-                    "params": entry.get("params", {}),
-                    "per_item_params": entry.get("per_item_params", []),
-                }
-                entries.append(e2)
-            cmds = build_batch(entries)
-            self.batch_output.delete("1.0", "end")
-            self.batch_output.insert("end", cmds)
-        except Exception as e:
-            messagebox.showerror("Batch Error", str(e))
+        roles_val = 'all' if roles == 'all' else [r.strip() for r in roles.split(',') if r.strip()]
+        itm = {'name': name, 'command': cmd, 'price': price_val, 'limit': limit, 'roles': roles_val}
+        store = json.load(open(SHOP_ITEMS_PATH)) if os.path.exists(SHOP_ITEMS_PATH) else {}
+        store.setdefault(cat, []).append(itm)
+        with open(SHOP_ITEMS_PATH, 'w') as f:
+            json.dump(store, f, indent=2)
+        role_disp = 'all' if roles_val == 'all' else ','.join(roles_val)
+        self.item_tv.insert('', 'end', values=(name, cmd, price_val, limit, role_disp))
+        self._log(f"Added item: {name} in category {cat}")
 
-    # ---------- Show/Hide helpers ---------- #
-    def show_item_fields(self):
-        self.item_frame.pack(fill="x", padx=10, pady=5)
+    def _load_library(self):
+        entries = arklib_loader.load_data()
+        for item in entries:
+            self.lib_tv.insert('', 'end', values=(item['Name'], item['Blueprint Path'], item['Mod/DLC']))
 
-    def hide_item_fields(self):
-        self.item_frame.pack_forget()
+    def _on_lib_import(self):
+        sel = self.lib_tv.selection()
+        if not sel:
+            return
+        name, blueprint, mod = self.lib_tv.item(sel, 'values')
+        self.name_entry.delete(0, tk.END)
+        self.name_entry.insert(0, name)
+        cmd = command_builders.build_spawn_command(blueprint_path=blueprint)
+        self.command_entry.delete(0, tk.END)
+        self.command_entry.insert(0, cmd)
+        self._log(f"Imported {name} from library")
 
-    def show_creature_fields(self):
-        self.creature_frame.pack(fill="x", padx=10, pady=5)
+    def _log(self, text):
+        self.log_box.configure(state='normal')
+        self.log_box.insert('end', text + '\n')
+        self.log_box.configure(state='disabled')
 
-    def hide_creature_fields(self):
-        self.creature_frame.pack_forget()
+    def _save_log(self):
+        path = filedialog.asksaveasfilename(defaultextension='.txt')
+        if path:
+            with open(path, 'w') as f:
+                f.write(self.log_box.get('1.0', 'end'))
+            messagebox.showinfo('Saved', f'Log saved to {path}')
 
+    def start_bot(self):
+        if self.process:
+            messagebox.showwarning('Running', 'Bot is already running')
+            return
+        self.process = subprocess.Popen(['python', 'Discord_Shop_System.py'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        self._read_output()
 
-if __name__ == "__main__":
-    app = WrecksShopGUI()
-    app.mainloop()
+    def _read_output(self):
+        if self.process.poll() is None:
+            line = self.process.stdout.readline()
+            if line:
+                self._log(line.strip())
+            self.root.after(100, self._read_output)
+
+if __name__ == '__main__':
+    root = tk.Tk()
+    WrecksShopLauncher(root)
+    root.mainloop()
