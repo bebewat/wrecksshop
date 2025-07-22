@@ -1,38 +1,43 @@
-name: Build exe with PyInstaller
+name: Build WrecksShop Windows EXE
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+    paths:
+      - '**.py'
+      - 'data/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch: {}
 
 jobs:
-  build:
+  build-windows:
     runs-on: windows-latest
-
     steps:
-      - uses: actions/checkout@v3
-      - name: Setup Python
-        uses: actions/setup-python@v4
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+            python-version: '3.11'
 
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pyinstaller mcrcon python-dotenv discord.py flask aiolimiter
-          
-      - name: Build GUI launcher EXE
-        shell: bash
+          pip install -r requirements.txt
+          # PyInstaller (if not in requirements)
+          pip install pyinstaller
+
+      - name: Build EXE with PyInstaller
         run: |
-          pyinstaller --onefile --windowed \
-            --name arkshopbot_gui \
-            --icon logo_icon.ico \
+          pyinstaller --noconfirm --clean ^
+            --name WrecksShop ^
+            --add-data "data/CleanArkData.csv;data" ^
+            --icon assets/wrecksshop.ico ^
             arkshopbot_launcher.py
 
-
-
-      - name: Upload GUI Launcher Artifact
+      - name: Archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: arkshopbot-gui-windows
-          path: dist\arkshopbot_gui.exe
+          name: WrecksShop-win
+          path: dist/WrecksShop/
