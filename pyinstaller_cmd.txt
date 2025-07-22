@@ -1,0 +1,9 @@
+pyinstaller --noconfirm --clean \
+  --name WrecksShop \
+  --add-data "data/CleanArkData.csv;data" \
+  arkshopbot_launcher.py
+```
+
+- Ensure `data/CleanArkData.csv` exists at that relative path.
+- If you have icons/resources: `--icon path/to/icon.ico`.
+- After build, exe will be `dist/WrecksShop/WrecksShop.exe`.
