@@ -274,16 +274,29 @@ class WrecksShopLauncher:
             for item in items:
                 self.lib_tv.insert('', 'end', values=(item.name, item.blueprint, item.mod))
 
-    def _on_lib_import(self):
+        def _on_lib_import(self):
         sel = self.lib_tv.selection()
-        if not sel: return
+        if not sel:
+            return
         name, blueprint, mod = self.lib_tv.item(sel,'values')
-        self.name_entry.delete(0,tk.END)
-        self.name_entry.insert(0,name)
-        cmd = command_builders.build_spawn_command(eos_id=mod, item=ArkItem(section='', name=name, blueprint=blueprint, mod=mod), level=1, breedable=False) if mod.lower().startswith('eos') else command_builders.build_spawn_command(eos_id='', item=ArkItem(section='', name=name, blueprint=blueprint, mod=mod), level=1, breedable=False)
-        self.command_entry.delete(0,tk.END)
-        self.command_entry.insert(0,cmd)
-        self._log(f"Imported {name} from library")
+        # Populate form fields
+        self.name_entry.delete(0, tk.END)
+        self.name_entry.insert(0, name)
+        # Build appropriate command: spawn dino if blueprint looks like dino, else give item
+        try:
+            ark_item = ArkItem(section='', name=name, blueprint=blueprint, mod=mod)
+            # Use spawn command for dinos
+            cmd = command_builders.build_spawn_dino_command(
+                eos_id='', item=ark_item, level=1, breedable=False
+            )
+        except Exception:
+            # Fallback to give item
+            cmd = command_builders.build_giveitem_command(
+                player_id=0, item=ArkItem('', name, blueprint, mod), qty=1, quality=1, is_bp=False
+            )
+        self.command_entry.delete(0, tk.END)
+        self.command_entry.insert(0, cmd)
+        self._log(f"Imported {name} from library")(f"Imported {name} from library")
 
     def _log(self, text):
         self.log_box.configure(state='normal')
