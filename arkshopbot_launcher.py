@@ -90,7 +90,7 @@ class WrecksShopGUI(tk.Tk):
         self.quality_var = tk.StringVar(value="1")
         ttk.Entry(ip, textvariable=self.quality_var, width=8).grid(row=2, column=1, sticky="w")
 
-        self.is_bp_var = tk.BooleanVar(False)
+        self.is_bp_var = tk.BooleanVar(value=False)
         ttk.Checkbutton(ip, text="Is Blueprint?", variable=self.is_bp_var).grid(row=3, column=0, columnspan=2, sticky="w")
 
         for i in range(2):
@@ -106,7 +106,7 @@ class WrecksShopGUI(tk.Tk):
         self.level_var = tk.StringVar(value="150")
         ttk.Entry(cp, textvariable=self.level_var, width=8).grid(row=1, column=1, sticky="w")
 
-        self.breedable_var = tk.BooleanVar(True)
+        self.breedable_var = tk.BooleanVar(value=True)
         ttk.Checkbutton(cp, text="Breedable", variable=self.breedable_var).grid(row=2, column=0, columnspan=2, sticky="w")
 
         for i in range(2):
