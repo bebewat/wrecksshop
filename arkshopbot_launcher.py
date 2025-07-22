@@ -271,9 +271,9 @@ class WrecksShopLauncher:
 
         def _load_library_display(self):
         # Populate Data Library Treeview from ARK_DATA
-        for section, items in ARK_DATA.items():
-            for item in items:
-                self.lib_tv.insert('', 'end', values=(item.name, item.blueprint, item.mod))
+            for section, items in ARK_DATA.items():
+                for item in items:
+                    self.lib_tv.insert('', 'end', values=(item.name, item.blueprint, item.mod))
 
     def _on_lib_import(self):
         # Import selected library entry into Shop Items form
