@@ -15,7 +15,7 @@ ASSETS_DIR = 'assets'
 LOGO_PATH = os.path.join(ASSETS_DIR, 'logo.png')
 ICON_PATH = os.path.join(ASSETS_DIR, 'icon.png')
 # CSV data library path
-CSV_REL_PATH = Path('data') / 'CleanArkData.csv'
+CSV_REL_PATH = Path('data') / 'data/CleanArkData.csv'
 ARK_DATA = load_ark_lib(CSV_REL_PATH)
 
 # Config keys for .env
