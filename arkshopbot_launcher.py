@@ -275,7 +275,7 @@ class WrecksShopLauncher:
                 self.lib_tv.insert('', 'end', values=(item.name, item.blueprint, item.mod))
 
         def _on_lib_import(self):
-        sel = self.lib_tv.selection()
+            sel = self.lib_tv.selection()
         if not sel:
             return
         name, blueprint, mod = self.lib_tv.item(sel,'values')
