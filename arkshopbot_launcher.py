@@ -144,12 +144,45 @@ class WrecksShopLauncher:
     def _build_library_tab(self):
         frame=ttk.Frame(self.nb)
         self.nb.add(frame, text='Data Library')
+        ttk.Label(frame, text='Category').pack(anchor='w', pady=(5,0))
+        self.lib_type_var = tk.StringVar()
+        types = list(ARK_DATA.keys())
+        self.lib_type_combo = ttk.Combobox(frame, textvariable=self.lib_type_var, values=types, state='readonly')
+        self.lib_type_combo.pack(fill='x', padx=5, pady=2)
         cols=('Name','Blueprint Path','Mod/DLC')
         self.lib_tv=ttk.Treeview(frame,columns=cols,show='headings')
         for c in cols: self.lib_tv.heading(c,text=c)
         self.lib_tv.pack(expand=True,fill='both',pady=5)
-        ttk.Button(frame,text='Import Selection',command=self._on_lib_import).pack(pady=4)
+        ttk.Button(frame,text='Import Selection',command=self._on_lib_import).pack(pady=(0,5))
 
+    def _populate_library_types(self):
+        if ARK_DATA:
+            default = list(ARK_DATA.keys())[0]
+            self.lib_type_combo.set(default)
+            self._on_type_select()
+
+    def _on_type_select(self):
+        section = self.lib_type_var.get()
+        self.lib_tv.delete(*self.lib_tv.get_children())
+        for item in ARK_DATA.get(section, []):
+            self.lib_tv.insert('', 'end', values=(item.name, item.blueprint, item.mod))
+
+    def _on_lib_import(self):
+        sel = self.lib_tv.selection()
+        if not sel: return
+        name, blueprint, mod = self.lib_tv.item(sel, 'values')
+        self.name_entry.delete(0, tk.END)
+        self.name_entry.insert(0, name)
+        section = self.lib_type_var.get()
+        ark_item = ArkItem(section=section, name=name, blueprint=blueprint, mod=mod)
+        if section.lower().startswith('creature') or section.lower() == 'creatures':
+            cmd = command_builders.build_spawn_dino_command(eos_id='{eos_id}', item=ark_item, level=224, breedable=False)
+        else:
+            cmd = command_builders.build_giveitem_command(player_id='{player_id}', item=ark_item, qty=1 quality=1, is_bp=False)
+        self.command_entry.delete(0, tk.END)
+        self.command_entry.insert(0, cmd)
+        self._log(f"Imported {name} from '{section}' library")
+        
     def _build_logs_tab(self):
         frame=ttk.Frame(self.nb)
         self.nb.add(frame,text='Logs')
