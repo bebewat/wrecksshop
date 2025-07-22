@@ -178,7 +178,7 @@ class WrecksShopLauncher:
         if section.lower().startswith('creature') or section.lower() == 'creatures':
             cmd = command_builders.build_spawn_dino_command(eos_id='{eos_id}', item=ark_item, level=224, breedable=False)
         else:
-            cmd = command_builders.build_giveitem_command(player_id='{player_id}', item=ark_item, qty=1 quality=1, is_bp=False)
+            cmd = command_builders.build_giveitem_command(player_id='{player_id}', item=ark_item, qty=1, quality=1, is_bp=False)
         self.command_entry.delete(0, tk.END)
         self.command_entry.insert(0, cmd)
         self._log(f"Imported {name} from '{section}' library")
